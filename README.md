@@ -29,7 +29,8 @@
 ### 安装依赖
 
 确保安装了所有必要的 Python 包。可以使用以下命令安装依赖：
-```
+
+```bash
 pip install -r requirements.txt
 ```
 ### 环境配置
@@ -48,6 +49,6 @@ DATABASE_PORT=5432
 
 ### 运行程序
 
-```
-python templates/claude/main.py
+```bash
+streamlit run app/main.py
 ```

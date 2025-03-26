@@ -46,5 +46,5 @@ DATABASE_PORT=5432
 ### Run the Program
 
 ```bash
-python templates/claude/main.py
+treamlit run app/main.py
 ```
