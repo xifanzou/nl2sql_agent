@@ -1,5 +1,7 @@
 # nl2sql_agent
 
+[English Version](README_en.md)
+
 ## 概述
 
 `NL2SQL_AGENT`是一个轻量级的自然语言到 SQL (NL2SQL) 智能体，旨在帮助用户通过自然语言查询 PostgreSQL 数据库。该智能体结合了文档处理、向量检索、LLM 和数据库交互，为用户提供高效、便捷的数据库查询体验。
