@@ -50,5 +50,5 @@ DATABASE_PORT=5432
 ### 运行程序
 
 ```bash
-streamlit run app/main.py
+streamlit run app/web.py
 ```

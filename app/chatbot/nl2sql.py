@@ -11,7 +11,7 @@ from core.knowledge_base import KnowledgeBase
 from core.database import DataBase
 
 class NL2SQLChatbot:
-    def __init__(self, documents_dir: str = "data", embedding_dim: int = 384):
+    def __init__(self, documents_dir: str = "../data", embedding_dim: int = 384):
         """
         Initialize the NL2SQL Chatbot with document processing and database capabilities
         
@@ -38,6 +38,8 @@ class NL2SQLChatbot:
         # Try to load cached knowledge base
         start_time = time.time()
         load_result = self.knowledge_base.load()
+        print("knowledge_base load_result: ", load_result)
+        
         if "No cache" in load_result:
             # Process documents if no cache
             self._process_documents(documents_dir)
@@ -135,7 +137,6 @@ class NL2SQLChatbot:
 和知识库相关内容：{relevant_knowledge}
 
 以及历史会话记录：{history_text}
-
 {'这是基于上一轮对话的一个follow-up。' if is_followup else ''}
 
 生成合法的SQL SELECT语句，要求：
@@ -151,33 +152,62 @@ class NL2SQLChatbot:
         return prompt
     
     def _detect_followup_question(self, query, history_queries):
-        """Detect if the current question is a follow-up to previous ones"""
-        # Simple heuristics for follow-up detection
+        """Detect if the current question is a follow-up to previous ones using LLM."""
         
-        # Check for pronouns that might refer to previous entities
-        followup_indicators = ['it', 'they', 'them', 'those', 'that', 'these', 'this']
-        query_lower = query.lower()
-        
-        for indicator in followup_indicators:
-            if re.search(r'\b' + indicator + r'\b', query_lower):
-                return True
-                
-        # Very short questions are often follow-ups
-        if len(query.split()) <= 4:
+        # Construct conversation context from the last few exchanges
+        conversation_context = ""
+        for turn in self.conversation_history[-3:]:  # Last 3 turns for context
+            user_text = turn.get("user", "Unknown User Input")
+            system_text = turn.get("system", "No System Response")
+            conversation_context += f"User: {user_text}\nSystem: {system_text}\n"
+
+        # Construct prompt to ask LLM
+        prompt = f"""
+        Given the conversation history below:
+
+        {conversation_context}
+
+        User's current query: {query}
+
+        Is the user's current query a follow-up to the previous questions? Respond with 'yes' or 'no'.
+        """
+
+        # Call the LLM to evaluate whether the current query is a follow-up question
+        followup_response = self.model_engine.call_coder_llm(query=query, prompt=prompt)
+
+        # Parse the LLM's response to determine follow-up
+        if followup_response.strip().lower() == 'yes':
             return True
-            
-        # No explicit table mention but previous queries had them
-        table_names = list(self.schema_info.keys())
-        has_table_reference = any(table.lower() in query_lower for table in table_names)
+        else:
+            return False
+    # def _detect_followup_question(self, query, history_queries):
+    #     """Detect if the current question is a follow-up to previous ones"""
+    #     # Simple heuristics for follow-up detection
         
-        if not has_table_reference and history_queries:
-            # Check if previous queries mentioned tables
-            prev_had_tables = any(
-                any(table.lower() in prev.lower() for table in table_names)
-                for prev in history_queries
-            )
-            if prev_had_tables:
-                return True
+    #     # Check for pronouns that might refer to previous entities
+    #     followup_indicators = ['it', 'they', 'them', 'those', 'that', 'these', 'this']
+    #     query_lower = query.lower()
+        
+    #     for indicator in followup_indicators:
+    #         if re.search(r'\b' + indicator + r'\b', query_lower):
+    #             return True
+                
+    #     # Very short questions are often follow-ups
+    #     if len(query.split()) <= 4:
+    #         return True
+            
+    #     # No explicit table mention but previous queries had them
+    #     table_names = list(self.schema_info.keys())
+    #     has_table_reference = any(table.lower() in query_lower for table in table_names)
+        
+    #     if not has_table_reference and history_queries:
+    #         # Check if previous queries mentioned tables
+    #         prev_had_tables = any(
+    #             any(table.lower() in prev.lower() for table in table_names)
+    #             for prev in history_queries
+    #         )
+    #         if prev_had_tables:
+    #             return True
                 
         return False
     
@@ -193,6 +223,7 @@ class NL2SQLChatbot:
         """Extract SQL_QUERY from generated text"""
         if "SQL_QUERY:" in generated_text:
             raw_sql = generated_text.split("SQL_QUERY:")[1].strip()
+            clean_sql = raw_sql.split("\n")[0].strip()
             if "```sql" in raw_sql:
                 clean_sql = raw_sql.replace("```sql", "").replace("```", "").strip()
                 return clean_sql
@@ -279,5 +310,6 @@ class NL2SQLChatbot:
             Result message
         """
         result = self.knowledge_base.add_document(file_path, self.doc_processor)
+        
         self.knowledge_base.save()  # Update cache
         return result

@@ -3,13 +3,20 @@ import os
 import csv
 import PyPDF2
 import markdown
+import numpy as np
 from sentence_transformers import SentenceTransformer
 
 class DocumentProcessor:
     """Handles multiple document formats and creates embeddings for RAG"""
-    def __init__(self, embedding_model="intfloat/multilingual-e5-small", embedding_dim=384):
+    def __init__(self, embedding_model="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", embedding_dim=384):
         self.embedding_model = SentenceTransformer(embedding_model)
         self.embedding_dim = embedding_dim
+        
+        # Verify and potentially adjust embedding dimension
+        actual_dim = self.embedding_model.get_sentence_embedding_dimension()
+        if actual_dim != embedding_dim:
+            print(f"Warning: Specified embedding dim {embedding_dim} does not match model's actual dim {actual_dim}. Using {actual_dim}.")
+            self.embedding_dim = actual_dim
         
     def process_document(self, file_path):
         """Process document based on file extension"""
@@ -97,6 +104,18 @@ class DocumentProcessor:
         return chunks
     
     def create_embeddings(self, chunks, batch_size=32):
-        """Create embeddings for text chunks"""
-        return self.embedding_model.encode(chunks, batch_size=batch_size, convert_to_numpy=True)
-    
+        """Create embeddings for text chunks with dimension control"""
+        # Encode chunks
+        embeddings = self.embedding_model.encode(chunks, batch_size=batch_size, convert_to_numpy=True)
+        
+        # Ensure correct dimension
+        if embeddings.shape[1] != self.embedding_dim:
+            print(f"Embedding shape {embeddings.shape} does not match expected dimension {self.embedding_dim}")
+            # Truncate or pad embeddings if necessary
+            if embeddings.shape[1] > self.embedding_dim:
+                embeddings = embeddings[:, :self.embedding_dim]
+            else:
+                pad_width = ((0, 0), (0, self.embedding_dim - embeddings.shape[1]))
+                embeddings = np.pad(embeddings, pad_width, mode='constant')
+        
+        return embeddings.astype('float32')

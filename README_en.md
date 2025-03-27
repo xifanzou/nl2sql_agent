@@ -46,5 +46,5 @@ DATABASE_PORT=5432
 ### Run the Program
 
 ```bash
-treamlit run app/main.py
+treamlit run app/web.py
 ```

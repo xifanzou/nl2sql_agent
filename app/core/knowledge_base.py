@@ -17,7 +17,7 @@ class KnowledgeBase:
         os.makedirs(cache_dir, exist_ok=True)
         
         # Initialize FAISS index
-        self.index = faiss.IndexFlatL2(embedding_dim)
+        self.index = faiss.IndexFlatIP(embedding_dim)
         
         # For optimizing frequent queries
         self.query_cache = {}
@@ -47,13 +47,19 @@ class KnowledgeBase:
             
             # Create and store embeddings
             embeddings = doc_processor.create_embeddings(chunks)
+            print(f"Embeddings shape: {embeddings.shape}") # Debugging
             
+            # Normalize embeddings for better cosine similarity
+            faiss.normalize_L2(embeddings)
+
             # Add to FAISS index
+            if embeddings.shape[1] != self.embedding_dim:
+                raise ValueError(f"Embedding dimension mismatch: {embeddings.shape[1]} != {self.embedding_dim}")
+            
             self.index.add(embeddings)
 
             process_time = time.time() - start_time
             return f"Added {len(chunks)} chunks from {source_name} in {process_time:.2f}s"
-    
     
         except RuntimeError as e:
             return str(e)
@@ -62,25 +68,33 @@ class KnowledgeBase:
         """Retrieve most relevant chunks for a query"""
         if not self.chunks:
             return []
+
+        # Get more candidates than needed for MMR
+        candidates_k = min(top_k * 3, len(self.chunks))
         
         # Check if query is in cache
         if query in self.query_cache:
             return self.query_cache[query]
         
-        # Create query embedding
+        # Create query embedding and normalize
         query_embedding = doc_processor.embedding_model.encode([query])[0].reshape(1, -1).astype('float32')
+        faiss.normalize_L2(query_embedding)
         
         # Search in FAISS index
-        D, I = self.index.search(query_embedding, top_k)
+        D, I = self.index.search(query_embedding, candidates_k)
         
+        # Create results
         results = []
         for i, idx in enumerate(I[0]):
-            if idx < len(self.chunks):  # Safety check
+            if idx < len(self.chunks):
                 results.append({
                     'text': self.chunks[idx],
-                    'distance': D[0][i],  # L2 distance (lower is better)
+                    'distance': D[0][i],  # Inner Product distance (higher is better)
                     'metadata': self.chunk_metadata[idx]
                 })
+                
+                if len(results) == top_k:
+                    break
         
         # Cache the results
         self._update_query_cache(query, results)
@@ -106,6 +120,7 @@ class KnowledgeBase:
         
         # Create query embedding
         query_embedding = doc_processor.embedding_model.encode([query])[0].reshape(1, -1).astype('float32')
+        print(f"Query embedding shape: {query_embedding.shape}")  # 检查查询嵌入向量的形状``
         
         # Search in FAISS index
         D, I = self.index.search(query_embedding, candidates_k)
@@ -175,25 +190,55 @@ class KnowledgeBase:
     
     def save(self):
         """Save knowledge base to disk"""
-        with open(f"{self.cache_dir}/kb_data.pkl", 'wb') as f:
-            pickle.dump({
-                'chunks': self.chunks,
-                'chunk_metadata': self.chunk_metadata
-            }, f)
+        try:
+            # Ensure cache directory exists
+            os.makedirs(self.cache_dir, exist_ok=True)
             
-        # Save FAISS index
-        faiss.write_index(self.index, f"{self.cache_dir}/kb_faiss.index")
+            # Full path for files
+            data_path = os.path.join(self.cache_dir, 'kb_data.pkl')
+            index_path = os.path.join(self.cache_dir, 'kb_faiss.index')
+            
+            # Save metadata
+            with open(data_path, 'wb') as f:
+                pickle.dump({
+                    'chunks': self.chunks,
+                    'chunk_metadata': self.chunk_metadata
+                }, f)
+            
+            # Save FAISS index
+            faiss.write_index(self.index, index_path)
+            
+            print(f"Saved {len(self.chunks)} chunks to cache")
+            return f"Saved {len(self.chunks)} chunks successfully"
+        
+        except Exception as e:
+            print(f"Error saving knowledge base: {e}")
+            return f"Error saving knowledge base: {e}"
     
     def load(self):
         """Load knowledge base from disk"""
         try:
-            with open(f"{self.cache_dir}/kb_data.pkl", 'rb') as f:
+            # Full paths for files
+            data_path = os.path.join(self.cache_dir, 'kb_data.pkl')
+            index_path = os.path.join(self.cache_dir, 'kb_faiss.index')
+            
+            # Check if cache files exist
+            if not (os.path.exists(data_path) and os.path.exists(index_path)):
+                return "No cache found"
+            
+            # Load metadata
+            with open(data_path, 'rb') as f:
                 data = pickle.load(f)
                 self.chunks = data['chunks']
                 self.chunk_metadata = data['chunk_metadata']
             
             # Load FAISS index
-            self.index = faiss.read_index(f"{self.cache_dir}/kb_faiss.index")
+            self.index = faiss.read_index(index_path)
+            
             return f"Loaded {len(self.chunks)} chunks from cache"
-        except:
-            return "No cache found or error loading cache"
+        
+        except FileNotFoundError:
+            return "No cache found"
+        except Exception as e:
+            print(f"Error loading knowledge base: {e}")
+            return f"Error loading knowledge base: {e}"

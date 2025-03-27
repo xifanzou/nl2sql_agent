@@ -1,5 +1,8 @@
 import streamlit as st
-import os
+import os, sys
+# Ensure Python can find the 'core' module inside 'app'
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "chatbot")))
+
 from dotenv import load_dotenv
 from chatbot.nl2sql import NL2SQLChatbot
 
@@ -7,11 +10,22 @@ from chatbot.nl2sql import NL2SQLChatbot
 load_dotenv()
 
 # Initialize the chatbot
+# def initialize_chatbot():
+#     absolute_path = os.path.abspath("nl2sql_agnet/data")
+#     print("absolute_path: ", absolute_path)
+#     return NL2SQLChatbot(documents_dir=absolute_path)
+
+absolute_path = os.path.abspath("data")
+print("absolute_path: ", absolute_path)
+
 @st.cache_resource
 def initialize_chatbot():
+    absolute_path = os.path.abspath("data")
+    print("absolute_path: ", absolute_path)
     return NL2SQLChatbot(
-        documents_dir="./data"  # Directory containing documentation files
+        documents_dir=absolute_path  # Directory containing documentation files
     )
+
 
 def main():
     st.set_page_config(
@@ -25,6 +39,11 @@ def main():
         st.session_state.messages = []
     
     # Get or initialize the chatbot
+    # if "chatbot" not in st.session_state:
+    #     st.session_state.chatbot = initialize_chatbot()
+
+    # chatbot = st.session_state.chatbot
+
     chatbot = initialize_chatbot()
     
     # App header
@@ -43,7 +62,7 @@ def main():
         
         if uploaded_file is not None:
             # Save uploaded file temporarily
-            file_path = os.path.join("./data", uploaded_file.name)
+            file_path = os.path.join("../data", uploaded_file.name)
             with open(file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             
