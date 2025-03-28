@@ -24,7 +24,7 @@ This tool is suitable for users who frequently need to query databases but are n
 
 ## Demo
 
-![Video Demo](assets/demo.mov)
+![Video Demo](assets/demo.mp4)
 
 ## Installation and Usage
 

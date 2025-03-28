@@ -26,7 +26,7 @@
 
 ## Demo
 
-![Video Demo](assets/demo.mov)
+![Video Demo](assets/demo.mp4)
 
 ## 安装与使用
 
