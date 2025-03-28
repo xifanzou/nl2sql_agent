@@ -1,0 +1,8 @@
+faiss-cpu
+numpy
+openai
+PyPDF2
+streamlit
+sentence-transformers
+python-dotenv
+markdown
