@@ -20,7 +20,7 @@ class SiliconFlowLLM():
         self.client = OpenAI(api_key=self.SILICON_FLOW_API_KEY,
                              base_url=self.SILICON_FLOW_BASE_URL)
         
-    def call_coder_llm(self, query, prompt):
+    def call_coder(self, query, prompt):
         response = self.client.chat.completions.create(
             model=self.SILICON_FLOW_NL2SQL_MODEL,  
             messages=[    

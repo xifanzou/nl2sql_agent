@@ -2,8 +2,6 @@ import os
 import re
 import time
 from collections import Counter
-from typing import List, Dict, Tuple, Any, Optional
-
 # from transformers import AutoTokenizer, AutoModel, pipeline # local call llm
 from core.llm import SiliconFlowLLM # api call llm
 from core.document_processor import DocumentProcessor 
@@ -48,7 +46,7 @@ class NL2SQLChatbot:
         else:
             print(f"Loaded knowledge base in {time.time() - start_time:.2f}s")
         
-        # Conversation history
+        # Conversation history & summary
         self.conversation_history = []
 
         # Query optimization
@@ -79,7 +77,7 @@ class NL2SQLChatbot:
         self._update_query_statistics(query)
 
         # Use MMR for diverse results
-        results = self.knowledge_base.retrieve_with_mmr(query, self.doc_processor, top_k=3, diversity=0.3)
+        results = self.knowledge_base.retrieve_with_mmr(query, self.doc_processor, top_k=5, diversity=0.35)
         
         # results = self.knowledge_base.retrieve_relevant(query, self.doc_processor, top_k=3)
         
@@ -118,7 +116,6 @@ class NL2SQLChatbot:
         
         # Format conversation history
         history_text = ""
-        history_queries = []
 
         for turn in self.conversation_history[-3:]:  # Last 3 turns for context
             user_text = turn.get("user", "Unknown User Input")
@@ -126,32 +123,31 @@ class NL2SQLChatbot:
             history_text += f"User: {user_text}\nSystem: {system_text}\n"
 
         # Detect if this is a follow-up question
-        is_followup = self._detect_followup_question(user_query, history_queries)
+        is_followup = self._detect_followup_question(user_query)
         
-
         # print(f"""=====chat_history=====\n{self.conversation_history}\n""")  # Debugging line
         # Format the prompt
         prompt = f"""
-基于数据table schema：{self.schema_info}
+        基于数据table schema：{self.schema_info}
 
-和知识库相关内容：{relevant_knowledge}
+        和知识库相关内容：{relevant_knowledge}
 
-以及历史会话记录：{history_text}
-{'这是基于上一轮对话的一个follow-up。' if is_followup else ''}
+        以及历史会话记录：{history_text}
+        {'这是基于上一轮对话的一个follow-up。' if is_followup else ''}
 
-生成合法的SQL SELECT语句，要求：
-1. 根据已知信息判断，是否需要引导用户提问或者提问用户获取信息
-2. 如果有足够信息，生成合法的SQL SELECT语句
-3. 返回查询结果
+        生成合法的SQL SELECT语句，要求：
+        1. 根据已知信息判断，是否需要引导用户提问或者提问用户获取信息
+        2. 如果有足够信息，生成合法的SQL SELECT语句
+        3. 返回查询结果
 
-如果模糊判断需要更多信息, respond with: "请提供具体信息: [specific question]"
-如果用户需要引导，respond with:"引导提问: [specific instruction]"
-如果已经有足够信息来生成sql, respond with: "SQL_QUERY: [SQL_QUERY]"
-"""
+        如果模糊判断需要更多信息, respond with: "请提供具体信息: [specific question]"
+        如果用户需要引导，respond with:"引导提问: [specific instruction]"
+        如果已经有足够信息来生成sql, respond with: "SQL_QUERY: [SQL_QUERY]"
+        """
         # print(f"""=====prompt=====\n{prompt}\n""")
         return prompt
     
-    def _detect_followup_question(self, query, history_queries):
+    def _detect_followup_question(self, query):
         """Detect if the current question is a follow-up to previous ones using LLM."""
         
         # Construct conversation context from the last few exchanges
@@ -173,43 +169,87 @@ class NL2SQLChatbot:
         """
 
         # Call the LLM to evaluate whether the current query is a follow-up question
-        followup_response = self.model_engine.call_coder_llm(query=query, prompt=prompt)
+        followup_response = self.model_engine.call_helper(query=query, prompt=prompt)
 
         # Parse the LLM's response to determine follow-up
         if followup_response.strip().lower() == 'yes':
             return True
         else:
             return False
-    # def _detect_followup_question(self, query, history_queries):
-    #     """Detect if the current question is a follow-up to previous ones"""
-    #     # Simple heuristics for follow-up detection
         
-    #     # Check for pronouns that might refer to previous entities
-    #     followup_indicators = ['it', 'they', 'them', 'those', 'that', 'these', 'this']
-    #     query_lower = query.lower()
+    def _handle_exploration_query(self, user_query):
+        """
+        Handle queries about available data and variables
         
-    #     for indicator in followup_indicators:
-    #         if re.search(r'\b' + indicator + r'\b', query_lower):
-    #             return True
-                
-    #     # Very short questions are often follow-ups
-    #     if len(query.split()) <= 4:
-    #         return True
-            
-    #     # No explicit table mention but previous queries had them
-    #     table_names = list(self.schema_info.keys())
-    #     has_table_reference = any(table.lower() in query_lower for table in table_names)
+        Returns:
+            Detailed information about database schema and available data
+        """
+        relevant_knowledge = self._retrieve_relevant_knowledge(user_query)
         
-    #     if not has_table_reference and history_queries:
-    #         # Check if previous queries mentioned tables
-    #         prev_had_tables = any(
-    #             any(table.lower() in prev.lower() for table in table_names)
-    #             for prev in history_queries
-    #         )
-    #         if prev_had_tables:
-    #             return True
-                
-        return False
+        # Prepare prompt for data exploration
+        exploration_prompt = f"""Database Schema Overview
+        Database Schema: {self.schema_info}
+        Relevant Knowledge: {relevant_knowledge}
+
+        Answer user's question by analyzing relevant Database schema and relevant knowledge.
+        Provide a clear, user-friendly explanation.
+
+        Response Requirements:
+        - Answer in the same language as the user’s query.
+        - Use a clear and structured format (e.g., bullet points, tables).
+        - Do not provide SQL queries.
+        - Keep the response within 500 words.
+        """
+        
+        # Generate exploration response
+        exploration_response = self.model_engine.call_helper(
+            query=user_query, 
+            prompt=exploration_prompt)
+        
+        return exploration_response
+
+    def _needs_explore(self, query):
+        prompt = f"""
+        Task: Determine if the user is asking a **general exploratory question** about available **data, indicators, metrics, categories, or entities** in a database.
+        ### **Exploratory Question Examples** (Answer 'yes' if similar):
+        - "What metrics can I query?"
+        - "What data is available?"
+        - "What kinds of failures are recorded?"
+        - "What types of vehicles exist?"
+        - "What can I analyze in this dataset?"
+        - "Tell me about the available fields in the database."
+        
+        ### **Non-Exploratory Questions** (Answer 'no' if similar):
+        - "What is the failure rate of vehicle type A?"
+        - "How many failures happened last month?"
+        - "Show me the top 10 most frequent failure types."
+        - "What is the average speed of all vehicles?"
+        - "Retrieve data for vehicle ID 1234."
+        
+        **Response Format:**  
+        - Reply with only `'yes'` if the query is exploratory.  
+        - Reply with only `'no'` if the query is specific.  
+        - No extra text, explanations, or formatting.
+
+        User Query: {query}
+        """
+        response = self.model_engine.call_helper(query=query, prompt=prompt)
+        return response
+        
+    def _finalize_analysis(self, results, user_query):
+        # Call helper_llm for natural language analysis of results
+        analysis_prompt = f"""
+        Given the user's query history: {self.conversation_history}
+        The SQL query results: {results}
+        The most recent user query: {user_query}
+
+        Please provide a natural language analysis of the SQL results and a general summary that incorporates all relevant user inputs.
+        """
+        analysis_response = self.model_engine.call_llm(
+            query=user_query, 
+            prompt=analysis_prompt)
+        
+        return analysis_response
     
     def _needs_clarification(self, query, generated_text):
         """Determine if we need more information from the user"""
@@ -220,15 +260,25 @@ class NL2SQLChatbot:
         return False, ""
     
     def _extract_sql_query(self, generated_text):
-        """Extract SQL_QUERY from generated text"""
-        if "SQL_QUERY:" in generated_text:
-            raw_sql = generated_text.split("SQL_QUERY:")[1].strip()
-            clean_sql = raw_sql.split("\n")[0].strip()
-            if "```sql" in raw_sql:
-                clean_sql = raw_sql.replace("```sql", "").replace("```", "").strip()
-                return clean_sql
-            return raw_sql
-        return None
+        """
+        Extract SQL_QUERY from generated text.
+        Handles cases where SQL is wrapped in Markdown or followed by extra content.
+        """
+        if "SQL_QUERY:" not in generated_text:
+            return None
+        raw_sql = generated_text.split("SQL_QUERY:")[1].strip()
+        clean_sql = re.sub(r"^```sql\s*|\s*```$", "", raw_sql, flags=re.MULTILINE).strip()
+
+        sql_match = re.search(r"^(.*?);", clean_sql, re.DOTALL)
+        if sql_match:
+            final_sql = sql_match.group(1).strip() + ";"
+        else:
+            final_sql = clean_sql.strip()
+
+        if not final_sql.endswith(";"):
+            final_sql += ";"
+
+        return final_sql
     
     def _validate_sql(self, query):
         """Enhanced SQL validation"""
@@ -260,11 +310,17 @@ class NL2SQLChatbot:
             self.conversation_history[-1]['user'] = user_query
         else:
             self.conversation_history.append({'user': user_query})
+        
+        _is_exploration = self._needs_explore(user_query)
+        if 'yes' in _is_exploration:
+            exploration_response = self._handle_exploration_query(user_query)
+            self.conversation_history[-1]['system'] = exploration_response
+            return exploration_response
             
         # Prepare prompt and generate response
         prompt = self._prepare_prompt(user_query)
         # generated_text = self.nlp_pipeline(prompt)[0]['generated_text'] # if call local llm
-        generated_text = self.model_engine.call_coder_llm(query=user_query, prompt=prompt)
+        generated_text = self.model_engine.call_coder(query=user_query, prompt=prompt)
         
         # Check if we need more information
         needs_clarification, clarification_question = self._needs_clarification(user_query, generated_text)
@@ -291,6 +347,10 @@ class NL2SQLChatbot:
         
         # Format response
         response = f"Generated SQL: {sql_query}\n\nResults:\n{results}"
+        
+        # Combine the SQL response with the analysis
+        analysis_response = self._finalize_analysis(results, user_query)
+        response += f"\n\nAnalysis:\n\n{analysis_response}"
 
         # Add timing info if in debug mode
         total_time = time.time() - start_time

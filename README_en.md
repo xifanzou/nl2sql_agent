@@ -21,6 +21,11 @@ This tool is suitable for users who frequently need to query databases but are n
 
 4.  **Efficient Vector Retrieval**: Utilizes the Faiss library to achieve efficient semantic search and vector recall.
 
+
+## Demo
+
+![Video Demo](assets/demo.mov)
+
 ## Installation and Usage
 
 ### Install Dependencies
