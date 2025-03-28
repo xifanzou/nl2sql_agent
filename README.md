@@ -24,9 +24,11 @@
 4. **高效向量检索**：利用 Faiss 库实现高效的语义搜索和向量召回功能。
 
 
-## Demo
+## Demo 演示
 
-![Video Demo](assets/demo.mp4)
+https://github.com/user-attachments/assets/1f9e7952-cfe7-407b-a6f2-debc8fba18c8
+
+
 
 ## 安装与使用
 
